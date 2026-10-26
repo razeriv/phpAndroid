@@ -1,1 +1,1 @@
-# phpAndroid
+# PHP server for Android API
