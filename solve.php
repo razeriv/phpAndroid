@@ -7,19 +7,20 @@ function sendResult($data, $status = 200) {
 
     echo json_encode(
         ['res' => $data],
-        JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        JSON_UNESCAPED_UNICODE
     );
     exit;
 }
 
-// Проверка параметров
+// Проверка входных данных
 $required = ['a0', 'a1', 'a2', 'f', 'epsilon'];
 $params = [];
 
 foreach ($required as $key) {
     if (!isset($_GET[$key]) ||
-        !is_string($_GET[$key]) ||
+        !is_scalar($_GET[$key]) ||
         !is_numeric($_GET[$key])) {
+
         sendResult(['error' => 'invalid_parameters'], 400);
     }
 
@@ -33,166 +34,114 @@ foreach ($required as $key) {
 $a0 = $params['a0'];
 $a1 = $params['a1'];
 $a2 = $params['a2'];
-$f = $params['f'];
-$epsilon = $params['epsilon'];
+$target = $params['f'];
+$eps = $params['epsilon'];
 
-if ($epsilon <= 0) {
+if ($eps <= 0) {
     sendResult(['error' => 'invalid_epsilon'], 400);
 }
 
-// a0*x^2 + a1*x + c = 0
-$c = $a2 - $f;
-
-if (!is_finite($c)) {
-    sendResult(['error' => 'calculation_error'], 400);
+function f($x, $a0, $a1, $a2) {
+    return $a0 + $a1 * $x + $a2 * $x * $x;
 }
 
-// Особые случаи
-if ($a0 == 0.0 && $a1 == 0.0) {
-    if ($c == 0.0) {
-        sendResult(['error' => 'infinite_roots']);
-    }
+function calculate($a0, $a1, $a2, $target, $eps) {
 
-    sendResult(['error' => 'no_roots']);
-}
+    $left = -1000.0;
+    $right = 1000.0;
+    $step = 0.01;
 
-// Функция уравнения
-$func = function ($x) use ($a0, $a1, $c) {
-    return ($a0 * $x + $a1) * $x + $c;
-};
+    $x1 = $left;
+    $f1 = f($x1, $a0, $a1, $a2) - $target;
 
-// Проверка противоположных знаков
-function oppositeSigns($a, $b) {
-    return ($a < 0 && $b > 0) ||
-           ($a > 0 && $b < 0);
-}
+    $found = false;
 
-// Метод дихотомии
-function dichotomy($func, $left, $right, $epsilon) {
+    // Поиск интервала с корнем
+    while ($x1 < $right) {
 
-    $fLeft = $func($left);
-    $fRight = $func($right);
+        $x2 = $x1 + $step;
+        $f2 = f($x2, $a0, $a1, $a2) - $target;
 
-    if (!is_finite($fLeft) || !is_finite($fRight)) {
-        return null;
-    }
-
-    if ($fLeft == 0.0) {
-        return [$left, 0.0];
-    }
-
-    if ($fRight == 0.0) {
-        return [$right, 0.0];
-    }
-
-    if (!oppositeSigns($fLeft, $fRight)) {
-        return null;
-    }
-
-    for ($i = 0; $i < 1000; $i++) {
-
-        $middle = $left + ($right - $left) / 2.0;
-        $error = ($right - $left) / 2.0;
-
-        if ($middle == $left || $middle == $right) {
-            return [$middle, $error];
-        }
-
-        $fMiddle = $func($middle);
-
-        if (!is_finite($fMiddle)) {
-            return null;
-        }
-
-        if ($fMiddle == 0.0) {
-            return [$middle, 0.0];
-        }
-
-        if ($error <= $epsilon) {
-            return [$middle, $error];
-        }
-
-        if (oppositeSigns($fLeft, $fMiddle)) {
-            $right = $middle;
-        } else {
-            $left = $middle;
-            $fLeft = $fMiddle;
-        }
-    }
-
-    return null;
-}
-
-$left = -1000.0;
-$right = 1000.0;
-
-$intervals = [];
-
-// диапазон по вершине параболы
-if ($a0 != 0.0) {
-
-    $vertex = -($a1 / $a0) / 2.0;
-
-    if (is_finite($vertex) &&
-        $vertex > $left &&
-        $vertex < $right) {
-
-        $intervals[] = [$left, $vertex];
-        $intervals[] = [$vertex, $right];
-
-    } else {
-        $intervals[] = [$left, $right];
-    }
-
-} else {
-    // Линейная функция
-    $intervals[] = [$left, $right];
-}
-
-// Поиск корней
-$roots = [];
-
-foreach ($intervals as $interval) {
-
-    $root = dichotomy(
-        $func,
-        $interval[0],
-        $interval[1],
-        $epsilon
-    );
-
-    if ($root === null) {
-        continue;
-    }
-
-    // Удаляю дубликаты корней
-    $duplicate = false;
-
-    foreach ($roots as $existing) {
-        if ($root[0] == $existing[0]) {
-            $duplicate = true;
+        if (abs($f1) < $eps) {
+            $left = $x1;
+            $right = $x1;
+            $found = true;
             break;
         }
+
+        if ($f1 * $f2 < 0) {
+            $left = $x1;
+            $right = $x2;
+            $found = true;
+            break;
+        }
+
+        $x1 = $x2;
+        $f1 = $f2;
     }
 
-    if (!$duplicate) {
-        $roots[] = $root;
+    if (!$found) {
+        return null;
     }
+
+    // Метод дихотомии
+    $iterations = 0;
+
+    while (($right - $left) / 2 > $eps) {
+
+        $mid = ($left + $right) / 2;
+
+        $fLeft = f($left, $a0, $a1, $a2) - $target;
+        $fMid = f($mid, $a0, $a1, $a2) - $target;
+
+        if (abs($fMid) < $eps) {
+            $left = $mid;
+            $right = $mid;
+            break;
+        }
+
+        if ($fLeft * $fMid < 0) {
+            $right = $mid;
+        } else {
+            $left = $mid;
+        }
+
+        $iterations++;
+
+        if ($iterations >= 1000) {
+            return null;
+        }
+    }
+
+    $x = ($left + $right) / 2;
+    $error = ($right - $left) / 2;
+
+    if (!is_finite($x) || !is_finite($error)) {
+        return null;
+    }
+
+    // Округление
+    $x = round($x, 4);
+    $error = round($error, 4);
+
+    return [
+        'x' => $x,
+        'epsilon' => $error
+    ];
 }
 
-// Если корней нет
-if (empty($roots)) {
+$result = calculate(
+    $a0,
+    $a1,
+    $a2,
+    $target,
+    $eps
+);
+
+if ($result === null) {
     sendResult(['error' => 'no_roots']);
 }
 
-// Сортировка по возрастанию
-usort($roots, function ($a, $b) {
-    return $a[0] <=> $b[0];
-});
-
-sendResult([
-    'x' => round($roots[0][0], 3),
-    'epsilon' => round($roots[0][1], 3)
-]);
+sendResult($result);
 
 ?>
